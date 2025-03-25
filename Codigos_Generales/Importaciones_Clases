@@ -1,0 +1,93 @@
+"""
+Tiene una base mas centrada en la programación orientada a objetos, con una definicion clave entre
+la funcion, objetivo y restricciones, ademas de la definicion de las variables y parametros. Clave
+la ruta en linux "/home/pc01/anaconda3/envs/io/bin/glpsol" para la ejecucion del solver.
+
+Las importaciones concretas son numpy, pandas y pyomo, no obsante, se necesita el GLPK para la ejecucion
+del solver, por lo que se debe instalar en el ambiente de anaconda. Configura tambien el virtual enviroment
+"""
+
+import numpy as np
+import pandas as pd
+from pyomo.environ import * 
+
+class Problema_Dieta:
+
+    def __init__(self, name=None): # Constructor de la clase
+        self.Data = [] # Inicializacion de la variable Data
+
+    def ReadExcelFile(self, FileName): # Metodo para leer el archivo de excel
+        self.Data = pd.read_excel(FileName, sheet_name='Data') # Lectura del archivo de excel
+        self.Nforrajes = len(self.Data) # Numero de forrajes (numero de datos dispuestos en el excel)
+
+    def Model (self): # Metodo para definir el modelo de programacion lineal
+        model = AbstractModel(name='Model') # Definicion del modelo
+
+        ## SETS ##
+        model.A = Set(initialize=np.arange(1,self.Nforrajes+1)) # Definicion del conjunto de forrajes
+
+        ## PARAMETROS ##
+        def C_init(model,i): # Definicion del parametro costo
+            return self.Data['Costo'].loc[i-1]
+        model.C = Param(model.A, rule=C_init)
+
+        def P_init(model,i): # Definicion del parametro proteina
+            return self.Data['Proteina'].loc[i-1]
+        model.P = Param(model.A, rule=P_init)
+
+        def F_init(model,i): # Definicion del parametro fibra
+            return self.Data['Fibra'].loc[i-1]
+        model.F = Param(model.A, rule=F_init)
+
+        ## VARIABLES ##
+        model.x = Var(model.A, within = NonNegativeReals, initialize = 0) # Definicion de la variable/s de decision
+
+        ## FUNCION OBJETIVAS ##
+        def Fun_obj(model): # Definicion de la funcion objetivo
+            return sum(model.C[i]*model.x[i] for i in model.A) # Ecuacion de la funcion objetivo
+        model.FunObj = Objective(rule = Fun_obj, sense = minimize) 
+
+        # ## RESTRICCIONES ##
+        def Restriccion_1 (model): # Definicion de la restriccion 1
+            return sum(model.x[i] for i in model.A) >= 800
+        model.restriccion_1 = Constraint(rule=Restriccion_1)
+
+        def Restriccion_2 (model): # Definicion de la restriccion 2
+            return sum(model.P[i]*model.x[i] for i in model.A) >= 0.3*sum(model.x[i] for i in model.A)
+        model.restriccion_2 = Constraint(rule=Restriccion_2)
+
+        def Restriccion_3 (model): # Definicion de la restriccion 3
+            return sum(model.F[i]*model.x[i] for i in model.A) <= 0.05*sum(model.x[i] for i in model.A)
+        model.restriccion_3 = Constraint(rule=Restriccion_3)
+
+        return model.create_instance()
+    
+    def Solver(self):
+
+        Modelo_dieta = self.Model() # Instancia del modelo
+        self.opt = SolverFactory('glpk', executable=r'/home/pc01/anaconda3/envs/io/bin/glpsol') # Solver
+        results = self.opt.solve(Modelo_dieta) # Solucion del modelo
+        results.write()
+
+        print('Valor Función Objetivo: ' + str(value(Modelo_dieta.FunObj)))  # Valor de la funcion objetivo
+        return Modelo_dieta
+
+    def Print_Results(self,Modelo_dieta):
+
+        Table = pd.DataFrame()
+
+        r=0
+        for i in Modelo_dieta.A:
+            Table.loc[r,'Tipo Forraje'] = str(i)
+            Table.loc[r,'Libras'] = round(Modelo_dieta.x[i].value,4)
+            r += 1
+
+        with pd.ExcelWriter('Resultados.xlsx') as data: 
+            Table.to_excel(data, sheet_name="Resultados")
+
+## Funcion Principal que ejecuta el codigo##
+if __name__ == "__main__":
+    runing = Problema_Dieta() # Instancia de la clase
+    runing.ReadExcelFile('') # Ruta del archivo
+    modelo = runing.Solver()
+    runing.Print_Results(modelo)
