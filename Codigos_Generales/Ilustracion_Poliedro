@@ -1,0 +1,122 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.optimize import linprog
+
+def graficar_restricciones(restricciones):
+    """
+    Grafica las restricciones en un plano cartesiano.
+    
+    Parámetros:
+    restricciones: Lista de diccionarios con las restricciones
+    Cada restricción debe tener:
+    - 'coeficientes': [a, b] para la forma ax1 + bx2 <= c
+    - 'limite': c (valor del lado derecho de la inecuación)
+    - 'etiqueta': Texto de la restricción para la leyenda
+    """
+    # Configurar el gráfico
+    plt.figure(figsize=(10, 8))
+    plt.title('Región Factible - Problema de Programación Lineal')
+    plt.xlabel('x1')
+    plt.ylabel('x2')
+    plt.grid(True, linestyle='--', linewidth=0.5)
+    
+    # Rango para graficar
+    x1 = np.linspace(0, 10, 100)
+    
+    # Graficar cada restricción
+    for i, restriccion in enumerate(restricciones):
+        a, b = restriccion['coeficientes']
+        c = restriccion['limite']
+        etiqueta = restriccion['etiqueta']
+        
+        # Despejar x2
+        if b != 0:
+            x2 = (c - a * x1) / b
+            
+            # Determinar la dirección de la región factible
+            if b > 0:
+                plt.fill_between(x1, x2, 10, alpha=0.2, label=f'{etiqueta} (región)')
+            else:
+                plt.fill_between(x1, 0, x2, alpha=0.2, label=f'{etiqueta} (región)')
+            
+            # Graficar la línea de la restricción
+            plt.plot(x1, x2, label=etiqueta)
+    
+    # Límites no negativos (si aplica)
+    plt.axhline(y=0, color='k', linestyle='--')
+    plt.axvline(x=0, color='k', linestyle='--')
+    
+    plt.legend()
+    plt.xlim(0, 10)
+    plt.ylim(0, 10)
+    
+    # Encontrar la región factible
+    def encontrar_vertices(restricciones):
+        vertices = []
+        for i in range(len(restricciones)):
+            for j in range(i+1, len(restricciones)):
+                # Resolver sistema de ecuaciones
+                A = np.array([
+                    restricciones[i]['coeficientes'], 
+                    restricciones[j]['coeficientes']
+                ])
+                b = np.array([
+                    restricciones[i]['limite'], 
+                    restricciones[j]['limite']
+                ])
+                
+                try:
+                    punto = np.linalg.solve(A, b)
+                    
+                    # Verificar que el punto cumple todas las restricciones
+                    if all(np.dot(rest['coeficientes'], punto) <= rest['limite'] for rest in restricciones):
+                        vertices.append(punto)
+                except:
+                    # Si no se puede resolver (líneas paralelas)
+                    pass
+        
+        return vertices
+    
+    # Graficar vértices
+    vertices = encontrar_vertices(restricciones)
+    for vertice in vertices:
+        plt.plot(vertice[0], vertice[1], 'ro')  # Puntos rojos
+    
+    print("Vértices de la región factible:")
+    for v in vertices:
+        print(f"({v[0]:.2f}, {v[1]:.2f})")
+    
+    plt.tight_layout()
+    plt.show()
+
+# Ejemplo de uso
+def ejemplo_restricciones():
+    # Ejemplo de restricciones
+    restricciones = [
+        {
+            'coeficientes': [1, 1],  # x1 + x2
+            'limite': 4,              # <= 4
+            'etiqueta': 'x1 + x2 ≤ 4'
+        },
+        {
+            'coeficientes': [2, 1],  # 2x1 + x2
+            'limite': 6,             # <= 6
+            'etiqueta': '2x1 + x2 ≤ 6'
+        },
+        {
+            'coeficientes': [1, 0],  # x1
+            'limite': 3,             # <= 3
+            'etiqueta': 'x1 ≤ 3'
+        },
+        {
+            'coeficientes': [0, 1],  # x2
+            'limite': 4,             # <= 4
+            'etiqueta': 'x2 ≤ 4'
+        }
+    ]
+    
+    graficar_restricciones(restricciones)
+
+# Ejecutar el ejemplo
+if __name__ == '__main__':
+    ejemplo_restricciones()
