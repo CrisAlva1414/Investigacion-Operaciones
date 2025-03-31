@@ -8,7 +8,7 @@ class Problema_Prestamo:
 
     def ReadExcelFile(self, FileName):
         self.Data = pd.read_excel(FileName, sheet_name='Data')
-        self.Nprestamos = 
+        self.Nprestamos = len(self.Data)
 
     def Model (self):
         model = AbstractModel(name='Model')
@@ -21,15 +21,16 @@ class Problema_Prestamo:
             return self.Data['Tasa'].loc[i-1]
         model.T = Param(model.A, rule=T_init)
 
-
-
+        def D_init(model,i):
+            return self.Data['Deuda'].loc[i-1]
+        model.D = Param(model.A, rule=D_init)
 
         ## VARIABLES ##
-        model.x = Var()
+        model.x = Var(model.A, within = NonNegativeReals, initialize = 0)
 
         ## OBJECTIVE FUNCTION ##
         def Fun_obj(model):
-            return sum(model.T[i]*(1-model.D[i])*model.x[i] )
+            return sum(model.T[i]*(1-model.D[i])*model.x[i] for i in model.A)
         model.FunObj = Objective(rule = Fun_obj, sense = maximize)
 
         # ## CONSTRAINTS ##
@@ -37,6 +38,17 @@ class Problema_Prestamo:
             return sum(model.x[i] for i in model.A) <= 12
         model.restriccion_1 = Constraint(rule=Restriccion_1)
 
+        def Restriccion_2(model):
+            return sum(model.x[i] for i in model.A if i >= 4) >= 0.4 * sum(model.x[i] for i in model.A)
+        model.restriccion_2 = Constraint(rule=Restriccion_2)
+
+        def Restriccion_3(model):
+            return model.x[3] >= 0.5 * sum(model.x[i] for i in model.A if i <= 3)
+        model.restriccion_3 = Constraint(rule=Restriccion_3)
+
+        def Restriccion_4(model):
+            return sum(model.x[i] * model.D[i] for i in model.A) <= 0.04 * sum(model.x[i] for i in model.A)
+        model.restriccion_4 = Constraint(rule=Restriccion_4)
 
         return model.create_instance()
     
@@ -44,7 +56,7 @@ class Problema_Prestamo:
 
         Modelo_Prestamo = self.Model()
         Modelo_Prestamo.pprint()
-        self.opt = SolverFactory("glpk")
+        self.opt = SolverFactory('glpk')
         results = self.opt.solve(Modelo_Prestamo)
         results.write()
 
@@ -67,6 +79,6 @@ class Problema_Prestamo:
 
 if __name__ == "__main__":
     runing = Problema_Prestamo()
-    runing.ReadExcelFile('Data_Prestamo_Bancario.xlsx')
+    runing.ReadExcelFile("/home/notebook01/Proyectos/Investigacion-Operaciones/I_Problema_Prestamo_Bancario/Data_Prestamo_Bancario.xlsx")
     modelo = runing.Solver()
     runing.Print_Results(modelo)
