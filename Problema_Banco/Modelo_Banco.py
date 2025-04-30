@@ -7,48 +7,48 @@ class Problema_Dieta:
         self.Data = []
 
     def ReadExcelFile(self, FileName):
-        self.Data = pd.read_excel(FileName, sheet_name='Data')
-        self.Nforrajes = len(self.Data)
+        self.Data = pd.read_excel(FileName, sheet_name='Problema_Banco/Datos.csv')
+        self.Nprestamo = len(self.Data)
 
     def Model (self):
         model = AbstractModel(name='Model')
 
         ## SETS ##
-        model.A = Set(initialize=np.arange(1,self.Nforrajes+1))
+        model.A = Set(initialize=np.arange(1,self.Nprestamo+1))
 
         ## PARAMETERS ##
-        def C_init(model,i):
-            return self.Data['Costo'].loc[i-1]
-        model.C = Param(model.A, rule=C_init)
+        def T_init(model,i):
+            return self.Data['Tasa de interes'].loc[i-1]
+        model.T = Param(model.A, rule=T_init)
 
         def P_init(model,i):
-            return self.Data['Proteina'].loc[i-1]
+            return self.Data['Per de Deuda'].loc[i-1]
         model.P = Param(model.A, rule=P_init)
-
-        def F_init(model,i):
-            return self.Data['Fibra'].loc[i-1]
-        model.F = Param(model.A, rule=F_init)
 
         ## VARIABLES ##
         model.x = Var(model.A, within = NonNegativeReals, initialize = 0)
 
         ## OBJECTIVE FUNCTION ##
         def Fun_obj(model):
-            return sum(model.C[i]*model.x[i] for i in model.A)
-        model.FunObj = Objective(rule = Fun_obj, sense = minimize)
+            return sum(model.T[i]*(1 - model.P[i])*model.x[i] - model.P[i]*model.x[i] for i in model.A)
+        model.FunObj = Objective(rule = Fun_obj, sense = maximize)
 
         # ## CONSTRAINTS ##
         def Restriccion_1 (model):
-            return sum(model.x[i] for i in model.A) >= 800
+            return sum(model.x[i] for i in model.A) <= 12
         model.restriccion_1 = Constraint(rule=Restriccion_1)
 
         def Restriccion_2 (model):
-            return sum(model.P[i]*model.x[i] for i in model.A) >= 0.3*sum(model.x[i] for i in model.A)
+            return sum((model.x[4]+model.x[5] in model.A)) >= 0.4*sum(model.x[i] for i in model.A)
         model.restriccion_2 = Constraint(rule=Restriccion_2)
 
         def Restriccion_3 (model):
-            return sum(model.F[i]*model.x[i] for i in model.A) <= 0.05*sum(model.x[i] for i in model.A)
+            return sum(model.x[3] in model.A) >= 0.5*sum(model.x[1] + model.x[2] + model.x[3] in model.A)
         model.restriccion_3 = Constraint(rule=Restriccion_3)
+
+        def Restriccion_4 (model):
+            return sum(model.P[i]*model.x[i] in model.A) <= 0.04*sum(model.x[i] in model.A)
+        model.restriccion_4 = Constraint(rule=Restriccion_4)
 
         return model.create_instance()
     
@@ -80,6 +80,6 @@ class Problema_Dieta:
 
 if __name__ == "__main__":
     runing = Problema_Dieta()
-    runing.ReadExcelFile('Data_Input.csv')
+    runing.ReadExcelFile('Datos.csv')
     modelo = runing.Solver()
     runing.Print_Results(modelo)

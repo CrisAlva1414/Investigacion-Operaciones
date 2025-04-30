@@ -1,0 +1,223 @@
+import tkinter as tk
+from tkinter import ttk, messagebox
+import numpy as np
+from scipy.optimize import linprog
+
+class SimplexApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Aplicación Método Simplex")
+        self.root.geometry("600x450")
+        self.root.resizable(False, False)
+        
+        # Variables para almacenar número de variables y restricciones
+        self.num_variables = tk.IntVar(value=2)
+        self.num_restricciones = tk.IntVar(value=2)
+        
+        # Frames para separar las ventanas
+        self.frame_inicial = tk.Frame(root)
+        self.frame_datos = tk.Frame(root)
+        self.frame_resultados = tk.Frame(root)
+        
+        self.setup_pantalla_inicial()
+        
+        # Mostrar pantalla inicial
+        self.mostrar_pantalla_inicial()
+
+    def setup_pantalla_inicial(self):
+        # Crear la pantalla inicial
+        tk.Label(self.frame_inicial, text="Aplicación Método Simplex", font=("Arial", 16, "bold")).pack(pady=20)
+        tk.Label(self.frame_inicial, text="Esta aplicación resuelve problemas de optimización lineal utilizando el método Simplex", 
+                 font=("Arial", 10), wraplength=400).pack(pady=10)
+        
+        # Frame para entrada de datos
+        input_frame = tk.Frame(self.frame_inicial)
+        input_frame.pack(pady=20)
+        
+        # Entrada para número de variables
+        tk.Label(input_frame, text="Número de variables:", font=("Arial", 12)).grid(row=0, column=0, padx=10, pady=10, sticky="w")
+        ttk.Spinbox(input_frame, from_=1, to=10, textvariable=self.num_variables, width=5).grid(row=0, column=1, padx=10, pady=10)
+        
+        # Entrada para número de restricciones
+        tk.Label(input_frame, text="Número de restricciones:", font=("Arial", 12)).grid(row=1, column=0, padx=10, pady=10, sticky="w")
+        ttk.Spinbox(input_frame, from_=1, to=10, textvariable=self.num_restricciones, width=5).grid(row=1, column=1, padx=10, pady=10)
+        
+        # Botón para continuar
+        tk.Button(self.frame_inicial, text="Continuar", command=self.setup_pantalla_datos, 
+                 font=("Arial", 12), bg="#4CAF50", fg="white", width=15).pack(pady=20)
+
+    def setup_pantalla_datos(self):
+        # Limpiar frame anterior
+        for widget in self.frame_datos.winfo_children():
+            widget.destroy()
+            
+        # Obtener valores
+        num_vars = self.num_variables.get()
+        num_rest = self.num_restricciones.get()
+        
+        # Crear pantalla para ingresar datos
+        tk.Label(self.frame_datos, text="Ingrese los datos del problema", font=("Arial", 14, "bold")).pack(pady=10)
+        
+        # Frame para la función objetivo
+        objetivo_frame = tk.Frame(self.frame_datos)
+        objetivo_frame.pack(pady=10, fill="x", padx=20)
+        
+        tk.Label(objetivo_frame, text="Función objetivo (maximizar):", font=("Arial", 12)).pack(anchor="w")
+        
+        # Coeficientes de la función objetivo
+        coef_frame = tk.Frame(objetivo_frame)
+        coef_frame.pack(fill="x", pady=5)
+        
+        self.coef_obj = []
+        for i in range(num_vars):
+            var_frame = tk.Frame(coef_frame)
+            var_frame.pack(side="left", padx=5)
+            
+            entry = tk.Entry(var_frame, width=5)
+            entry.pack(side="left")
+            self.coef_obj.append(entry)
+            
+            if i < num_vars - 1:
+                tk.Label(var_frame, text=f"x{i+1} +").pack(side="left")
+            else:
+                tk.Label(var_frame, text=f"x{i+1}").pack(side="left")
+        
+        # Frame para las restricciones
+        rest_frame = tk.Frame(self.frame_datos)
+        rest_frame.pack(pady=10, fill="x", padx=20)
+        
+        tk.Label(rest_frame, text="Restricciones (≤):", font=("Arial", 12)).pack(anchor="w")
+        
+        # Matrices para almacenar las entradas
+        self.restricciones_coef = []
+        self.restricciones_rhs = []
+        
+        # Crear campos para cada restricción
+        for i in range(num_rest):
+            rest_i_frame = tk.Frame(rest_frame)
+            rest_i_frame.pack(fill="x", pady=5)
+            
+            coefs_i = []
+            for j in range(num_vars):
+                var_frame = tk.Frame(rest_i_frame)
+                var_frame.pack(side="left", padx=2)
+                
+                entry = tk.Entry(var_frame, width=5)
+                entry.pack(side="left")
+                coefs_i.append(entry)
+                
+                if j < num_vars - 1:
+                    tk.Label(var_frame, text=f"x{j+1} +").pack(side="left")
+                else:
+                    tk.Label(var_frame, text=f"x{j+1} ≤").pack(side="left")
+            
+            self.restricciones_coef.append(coefs_i)
+            
+            # Lado derecho de la restricción
+            rhs_entry = tk.Entry(rest_i_frame, width=5)
+            rhs_entry.pack(side="left", padx=5)
+            self.restricciones_rhs.append(rhs_entry)
+        
+        # Botones de navegación
+        btn_frame = tk.Frame(self.frame_datos)
+        btn_frame.pack(pady=20)
+        
+        tk.Button(btn_frame, text="Regresar", command=self.mostrar_pantalla_inicial, 
+                  font=("Arial", 11), bg="#f44336", fg="white", width=10).pack(side="left", padx=10)
+        
+        tk.Button(btn_frame, text="Resolver", command=self.resolver_simplex, 
+                  font=("Arial", 11), bg="#4CAF50", fg="white", width=10).pack(side="left", padx=10)
+
+    def setup_pantalla_resultados(self, resultados, estado, mensaje):
+        # Limpiar frame anterior
+        for widget in self.frame_resultados.winfo_children():
+            widget.destroy()
+            
+        # Título
+        tk.Label(self.frame_resultados, text="Resultados del Método Simplex", font=("Arial", 14, "bold")).pack(pady=10)
+        
+        # Estado de la solución
+        tk.Label(self.frame_resultados, text=f"Estado: {estado}", font=("Arial", 12)).pack(anchor="w", padx=20, pady=5)
+        tk.Label(self.frame_resultados, text=f"Mensaje: {mensaje}", font=("Arial", 12), wraplength=500).pack(anchor="w", padx=20, pady=5)
+        
+        # Resultados
+        if resultados is not None:
+            # Frame para valores óptimos
+            valores_frame = tk.Frame(self.frame_resultados)
+            valores_frame.pack(fill="x", padx=20, pady=10)
+            
+            tk.Label(valores_frame, text="Valores óptimos de las variables:", font=("Arial", 12, "bold")).pack(anchor="w")
+            
+            for i, valor in enumerate(resultados['x']):
+                tk.Label(valores_frame, text=f"x{i+1} = {valor:.4f}", font=("Arial", 11)).pack(anchor="w", pady=2)
+            
+            # Valor de la función objetivo
+            tk.Label(self.frame_resultados, text=f"Valor de la función objetivo: {-resultados['fun']:.4f}", 
+                     font=("Arial", 12, "bold")).pack(anchor="w", padx=20, pady=10)
+        
+        # Botón para regresar
+        tk.Button(self.frame_resultados, text="Nuevo problema", command=self.mostrar_pantalla_inicial, 
+                 font=("Arial", 12), bg="#2196F3", fg="white", width=15).pack(pady=20)
+
+    def mostrar_pantalla_inicial(self):
+        self.frame_datos.pack_forget()
+        self.frame_resultados.pack_forget()
+        self.frame_inicial.pack(fill="both", expand=True)
+
+    def mostrar_pantalla_datos(self):
+        self.frame_inicial.pack_forget()
+        self.frame_resultados.pack_forget()
+        self.frame_datos.pack(fill="both", expand=True)
+
+    def mostrar_pantalla_resultados(self):
+        self.frame_inicial.pack_forget()
+        self.frame_datos.pack_forget()
+        self.frame_resultados.pack(fill="both", expand=True)
+
+    def resolver_simplex(self):
+        try:
+            num_vars = self.num_variables.get()
+            
+            # Obtener coeficientes de la función objetivo
+            c = [float(entry.get().replace(',', '.')) for entry in self.coef_obj]
+            # Convertir a negativo para maximizar (scipy.linprog minimiza por defecto)
+            c = [-val for val in c]
+            
+            # Obtener matriz de coeficientes de las restricciones
+            A = []
+            for fila in self.restricciones_coef:
+                A.append([float(entry.get().replace(',', '.')) for entry in fila])
+            
+            # Obtener lado derecho de las restricciones
+            b = [float(entry.get().replace(',', '.')) for entry in self.restricciones_rhs]
+            
+            # Restricciones de no negatividad
+            A_ub = A
+            b_ub = b
+            
+            # Resolver con scipy.linprog
+            result = linprog(c, A_ub=A_ub, b_ub=b_ub, bounds=(0, None), method='simplex')
+            
+            # Mensajes de estado
+            status_messages = {
+                0: "Solución óptima encontrada",
+                1: "Iteración máxima alcanzada",
+                2: "Problema infactible",
+                3: "Problema no acotado",
+                4: "Error numérico"
+            }
+            
+            estado = status_messages.get(result.status, "Estado desconocido")
+            mensaje = result.message
+            
+            # Mostrar resultados
+            self.setup_pantalla_resultados(result, estado, mensaje)
+            self.mostrar_pantalla_resultados()
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Ocurrió un error al resolver el problema:\n{str(e)}")
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = SimplexApp(root)
+    root.mainloop()

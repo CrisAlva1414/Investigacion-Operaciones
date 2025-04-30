@@ -21,7 +21,7 @@ def graficar_restricciones(restricciones):
     plt.grid(True, linestyle='--', linewidth=0.5)
     
     # Rango para graficar
-    x1 = np.linspace(0, 10, 100)
+    x1 = np.linspace(0, 1500, 100)
     
     # Graficar cada restricción
     for i, restriccion in enumerate(restricciones):
@@ -47,8 +47,8 @@ def graficar_restricciones(restricciones):
     plt.axvline(x=0, color='k', linestyle='--')
     
     plt.legend()
-    plt.xlim(0, 10)
-    plt.ylim(0, 10)
+    plt.xlim(0, 1500)
+    plt.ylim(0, 1500)
     
     # Encontrar la región factible
     def encontrar_vertices(restricciones):
@@ -94,25 +94,30 @@ def ejemplo_restricciones():
     # Ejemplo de restricciones
     restricciones = [
         {
-            'coeficientes': [1, 1],  # x1 + x2
-            'limite': 4,              # <= 4
-            'etiqueta': 'x1 + x2 ≤ 4'
+            'coeficientes': [-1, -1],  # x1 + x2
+            'limite': -800,              # <= 4
+            'etiqueta': 'ec1'
         },
         {
-            'coeficientes': [2, 1],  # 2x1 + x2
-            'limite': 6,             # <= 6
-            'etiqueta': '2x1 + x2 ≤ 6'
+            'coeficientes': [0.21, -0.30],  # 2x1 + x2
+            'limite': 0,             # <= 6
+            'etiqueta': 'ec2'
         },
         {
-            'coeficientes': [1, 0],  # x1
-            'limite': 3,             # <= 3
-            'etiqueta': 'x1 ≤ 3'
+            'coeficientes': [0.03, -0.01],  # x1
+            'limite': 0,             # <= 3
+            'etiqueta': 'ec3'
         },
         {
-            'coeficientes': [0, 1],  # x2
-            'limite': 4,             # <= 4
-            'etiqueta': 'x2 ≤ 4'
-        }
+            'coeficientes': [-1, 0],  # x1
+            'limite': 0,             # <= 3
+            'etiqueta': 'ec4'
+        },
+        {
+            'coeficientes': [0, -1],  # x1
+            'limite': 0,             # <= 3
+            'etiqueta': 'ec5'
+        },
     ]
     
     graficar_restricciones(restricciones)
