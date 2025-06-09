@@ -1,0 +1,226 @@
+import debug_pyomo_model as dbg
+import numpy as np
+import pandas as pd
+from pyomo.environ import *
+from pyomo.opt import TerminationCondition
+
+class EnergyExchangeModel:
+    def __init__(self):
+        # Costo de generación local (puedes ajustar este valor)
+        self.cost_pg = 0.05
+        # Constante grande para restricciones de exclusividad (Big-M)
+        self.M = 1e10
+
+    def ReadExcelFile(self, FileName):
+        # Lee los datos desde el archivo Excel
+        self.Buses = pd.read_excel(FileName, sheet_name='Buses')
+        self.Lines = pd.read_excel(FileName, sheet_name='Lines')
+        self.Adj_Matrix = pd.read_excel(FileName, sheet_name='Adj_Matrix', index_col=0)
+        self.Profiles = pd.read_excel(FileName, sheet_name='Profiles')
+        self.Circum = pd.read_excel(FileName, sheet_name='Circum')
+
+        # Extrae información relevante de los datos
+        self.bus_ids = self.Buses['bus_i'].values
+        self.PL = self.Buses['PL'].values  # Demanda activa por nodo
+        # Demanda reactiva (puede ser constante o por periodo)
+        if 'QL' in self.Buses.columns:
+            if self.Buses['QL'].dtype == 'O' or self.Buses['QL'].shape[0] == 1:
+                self.QL = self.Buses['QL'].values  # Constante
+            else:
+                self.QL = self.Buses['QL'].values
+        else:
+            self.QL = np.zeros_like(self.PL)  # Si no hay datos, se asume cero
+
+        self.Vmax = self.Buses['Vmax'].values  # Máximo voltaje permitido
+        self.Vmin = self.Buses['Vmin'].values  # Mínimo voltaje permitido
+        self.PSGmax = self.Buses['P_SG_max'].values  # Máxima venta a red
+        self.PBGmax = self.Buses['P_BG_max'].values  # Máxima compra a red
+        self.DG = self.Buses['DG'].values  # ¿Tiene generación local?
+
+        self.from_bus = self.Lines['fbus'].values  # Nodo de origen de cada línea
+        self.to_bus = self.Lines['tbus'].values    # Nodo de destino de cada línea
+        self.R = self.Lines['r'].values            # Resistencia de línea
+        self.X = self.Lines['x'].values            # Reactancia de línea
+        self.Smax = self.Lines['Smax'].values      # Límite térmico de línea
+
+        self.hours = self.Profiles['Hour'].values
+        # Matriz de generación máxima por nodo y periodo
+        self.PGmax = self.Profiles[[col for col in self.Profiles.columns if col.startswith('P_')]].values
+        self.Prices = self.Profiles['Price'].values  # Precio de compra a red
+        # Precio de venta a red (si no existe, se asume 90% del precio de compra)
+        if 'Selling_Price' in self.Profiles.columns:
+            self.Selling_Prices = self.Profiles['Selling_Price'].values
+        else:
+            self.Selling_Prices = self.Prices * 0.9
+
+        self.adj_matrix = self.Adj_Matrix.values
+
+        # Parámetros para restricciones térmicas (circunferencia)
+        self.alpha = self.Circum['AA'].values
+        self.beta = self.Circum['BB'].values
+        self.delta = self.Circum['CC'].values
+
+        # El nodo 1 es el slack: no tiene demanda ni generación local
+        self.PL[0] = 0
+        self.QL[0] = 0
+
+        # Tamaños de los conjuntos
+        self.N_buses = len(self.Buses)
+        self.N_lines = len(self.Lines)
+        self.N_periods = len(self.Profiles)
+        self.N_circum = len(self.Circum)
+
+    def BuildModel(self):
+        model = ConcreteModel()
+
+        # Conjuntos
+        model.B = RangeSet(1, self.N_buses)      # Nodos
+        model.L = RangeSet(1, self.N_lines)      # Líneas
+        model.T = RangeSet(1, self.N_periods)    # Periodos de tiempo
+        model.R = RangeSet(1, self.N_circum)     # Restricciones térmicas
+
+        # Parámetros
+        model.PL = Param(model.B, initialize={i+1: self.PL[i] for i in range(self.N_buses)})
+        model.Vmax = Param(model.B, initialize={i+1: self.Vmax[i] for i in range(self.N_buses)})
+        model.Vmin = Param(model.B, initialize={i+1: self.Vmin[i] for i in range(self.N_buses)})
+        model.PSGmax = Param(model.B, initialize={i+1: self.PSGmax[i] for i in range(self.N_buses)})
+        model.PBGmax = Param(model.B, initialize={i+1: self.PBGmax[i] for i in range(self.N_buses)})
+        model.DG = Param(model.B, initialize={i+1: self.DG[i] for i in range(self.N_buses)})
+        model.QL = Param(model.B, initialize={i+1: self.QL[i] for i in range(self.N_buses)})
+
+        # Generación máxima local por nodo y periodo
+        def PGmax_init(m, i, t):
+            return self.PGmax[t-1, i-1]
+        model.PGmax = Param(model.B, model.T, initialize=PGmax_init)
+
+        model.Price = Param(model.T, initialize={t+1: self.Prices[t] for t in range(self.N_periods)})
+        model.Selling_Price = Param(model.T, initialize={t+1: self.Selling_Prices[t] for t in range(self.N_periods)})
+
+        model.Res = Param(model.L, initialize={l+1: self.R[l] for l in range(self.N_lines)})
+        model.X = Param(model.L, initialize={l+1: self.X[l] for l in range(self.N_lines)})
+        model.Smax = Param(model.L, initialize={l+1: self.Smax[l] for l in range(self.N_lines)})
+
+        model.alpha = Param(model.R, initialize={r+1: self.alpha[r] for r in range(self.N_circum)})
+        model.beta = Param(model.R, initialize={r+1: self.beta[r] for r in range(self.N_circum)})
+        model.delta = Param(model.R, initialize={r+1: self.delta[r] for r in range(self.N_circum)})
+
+        # Variables de decisión
+        model.pg = Var(model.B, model.T, within=NonNegativeReals)      # Generación local
+        model.kb = Var(model.B, model.T, within=NonNegativeReals)      # Compra a red
+        model.ks = Var(model.B, model.T, within=NonNegativeReals)      # Venta a red
+        model.e = Var(model.B, model.B, model.T, within=NonNegativeReals)  # Intercambio entre nodos
+        model.v = Var(model.B, model.T, within=NonNegativeReals)       # Voltaje cuadrático
+        model.pf = Var(model.L, model.T, within=Reals)                 # Flujo activo en línea
+        model.qf = Var(model.L, model.T, within=Reals)                 # Flujo reactivo en línea
+
+        model.y = Var(model.B, model.T, within=Binary)                 # Binaria: compra (1) o venta (0) a red
+        model.dp = Var(model.B, model.T, within=Reals)                 # Demanda neta
+        model.dp_pos = Var(model.B, model.T, within=NonNegativeReals)  # Parte positiva de dp
+        model.dp_neg = Var(model.B, model.T, within=NonNegativeReals)  # Parte negativa de dp
+
+        # FUNCIÓN OBJETIVO: Minimizar el costo total (compra - venta + generación local)
+        def obj_rule(m):
+            return sum(m.Price[t]*m.kb[i,t] - m.Selling_Price[t]*m.ks[i,t] + self.cost_pg*m.pg[i,t] 
+                       for i in m.B for t in m.T)
+        model.OBJ = Objective(rule=obj_rule, sense=minimize)
+
+        # RESTRICCIONES
+
+        # 1. Balance de potencia activa en cada nodo y periodo
+        def balance_activa_rule(m, i, t):
+            outgoing = sum(m.pf[l, t] for l in m.L if self.from_bus[l-1] == i)
+            incoming = sum(m.pf[l, t] for l in m.L if self.to_bus[l-1] == i)
+            sales = sum(m.e[i, j, t] for j in m.B if j != i)
+            purchases = sum(m.e[j, i, t] for j in m.B if j != i)
+            return outgoing - incoming + purchases - sales == m.dp[i, t]
+        model.BalanceActiva = Constraint(model.B, model.T, rule=balance_activa_rule)
+
+        # 2. Balance de potencia reactiva (asumida constante)
+        def balance_reactiva_rule(m, i, t):
+            outgoing = sum(m.qf[l, t] for l in m.L if self.from_bus[l-1] == i)
+            incoming = sum(m.qf[l, t] for l in m.L if self.to_bus[l-1] == i)
+            return outgoing - incoming == m.QL[i]
+        model.BalanceReactiva = Constraint(model.B, model.T, rule=balance_reactiva_rule)
+
+        # 3. Caída de tensión en cada línea (modelo cuadrático simplificado)
+        def tension_rule(m, l, t):
+            i = self.from_bus[l-1]
+            j = self.to_bus[l-1]
+            return m.v[j, t] == m.v[i, t] - 2 * (m.Res[l] * m.pf[l, t] + m.X[l] * m.qf[l, t])
+        model.Tension = Constraint(model.L, model.T, rule=tension_rule)
+
+        # 4. Límites de tensión en cada nodo
+        model.VminConstraint = Constraint(model.B, model.T, rule=lambda m, i, t: m.Vmin[i] <= m.v[i, t])
+        model.VmaxConstraint = Constraint(model.B, model.T, rule=lambda m, i, t: m.v[i, t] <= m.Vmax[i])
+
+        # 5. Límites térmicos de línea (circunferencia)
+        def thermal_limit_rule(m, l, t, r):
+            return m.alpha[r] * m.pf[l, t] + m.beta[r] * m.qf[l, t] <= m.Smax[l]
+        model.ThermalLimit = Constraint(model.L, model.T, model.R, rule=thermal_limit_rule)
+
+        # 6. Demanda neta en cada nodo
+        def demanda_neta_rule(m, i, t):
+            return (m.dp[i, t] == m.PL[i] - m.pg[i, t] + m.kb[i, t] - m.ks[i, t] - 
+                    sum(m.e[i, j, t] for j in m.B if j != i) + 
+                    sum(m.e[j, i, t] for j in m.B if j != i))
+        model.DemandaNeta = Constraint(model.B, model.T, rule=demanda_neta_rule)
+
+        # 7. Descomposición de demanda neta en partes positiva y negativa
+        def dp_descomposition_rule(m, i, t):
+            return m.dp[i, t] == m.dp_pos[i, t] - m.dp_neg[i, t]
+        model.DPDescomposition = Constraint(model.B, model.T, rule=dp_descomposition_rule)
+
+        # 8. Exclusividad: no se puede comprar y vender a la red simultáneamente
+        def exclusividad_rule1(m, i, t):
+            return m.kb[i, t] <= m.y[i, t] * self.M
+        model.Exclusividad1 = Constraint(model.B, model.T, rule=exclusividad_rule1)
+
+        def exclusividad_rule2(m, i, t):
+            return m.ks[i, t] <= (1 - m.y[i, t]) * self.M
+        model.Exclusividad2 = Constraint(model.B, model.T, rule=exclusividad_rule2)
+
+        # 9. Nodo 1 es slack: voltaje fijo
+        model.Vslack = Constraint(model.T, rule=lambda m, t: m.v[1, t] == 1)
+
+        # 10. Límites de generación local, compra y venta a red
+        model.GenLimit = Constraint(model.B, model.T, rule=lambda m, i, t: m.pg[i, t] <= m.PGmax[i, t])
+        model.BuyLimit = Constraint(model.B, model.T, rule=lambda m, i, t: m.kb[i, t] <= m.PBGmax[i])
+        model.SellLimit = Constraint(model.B, model.T, rule=lambda m, i, t: m.ks[i, t] <= m.PSGmax[i])
+
+        # 11. Nodo 1 no puede generar localmente
+        model.Nodo1_pg_zero = Constraint(model.T, rule=lambda m, t: m.pg[1, t] == 0)
+
+        self.model = model
+
+    def SolveModel(self):
+        # Selecciona el solver (GLPK)
+        solver = SolverFactory('gurobi')
+        # Opciones del solver
+        solver.options['tmlim'] = 600  # Tiempo máximo de ejecución (segundos)
+        solver.options['mipgap'] = 0.01  # Gap de optimalidad permitido (1%)
+        result = solver.solve(self.model, tee=True)
+        return result
+
+    def PrintResults(self):
+        # Imprime resultados si existen
+        if hasattr(self, 'results'):
+            if self.results.solver.termination_condition == TerminationCondition.optimal:
+                print('Objective Value:', value(self.model.OBJ))
+                for k in self.model.kb:
+                    print(f'kb[{k}] = {value(self.model.kb[k])}')
+                # otros prints...
+            else:
+                print("Solver no encontró solución óptima. Termination condition:", self.results.solver.termination_condition)
+        else:
+            print("No hay resultados para mostrar.")
+
+if __name__ == "__main__":
+    modelo = EnergyExchangeModel()
+    modelo.ReadExcelFile('Problema_Control/Data_Input.xlsx')
+    dbg.check_dataframe_shapes(modelo)
+    dbg.check_for_nans(modelo)
+    modelo.BuildModel()
+    dbg.print_model_status(modelo)
+    instancia = modelo.SolveModel()
+    dbg.print_results(modelo)
+    modelo.PrintResults()
